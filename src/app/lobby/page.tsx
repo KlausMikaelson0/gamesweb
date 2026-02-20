@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { ArrowLeft, DoorOpen, PlusSquare, UsersRound } from "lucide-react";
@@ -12,6 +12,14 @@ import type { GameId } from "@/types/realtime";
 const GAME_IDS = new Set<GameId>(Object.keys(GAME_LIBRARY) as GameId[]);
 
 export default function LobbyPage() {
+  return (
+    <Suspense fallback={<LobbyLoadingState />}>
+      <LobbyContent />
+    </Suspense>
+  );
+}
+
+function LobbyContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [playerName, setPlayerName] = useState("");
@@ -147,6 +155,16 @@ export default function LobbyPage() {
             </p>
           )}
         </motion.section>
+      </div>
+    </div>
+  );
+}
+
+function LobbyLoadingState() {
+  return (
+    <div className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100 sm:px-6">
+      <div className="mx-auto w-full max-w-lg rounded-3xl border border-white/15 bg-slate-900/70 p-6">
+        <p className="text-sm text-slate-300">Loading lobby...</p>
       </div>
     </div>
   );

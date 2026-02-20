@@ -132,7 +132,6 @@ export default function RoomPage() {
     socket.on("sketch:round-ended", onRoundEnded);
 
     if (!socket.connected) {
-      setConnectionStatus("connecting");
       socket.connect();
     } else {
       onConnect();
