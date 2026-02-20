@@ -19,8 +19,10 @@ Next.js + Tailwind + Socket.io implementation of a real-time multiplayer games h
   - Custom Quiz question module
   - Spin-the-Wheel text module
   - Personal Bingo phrase-to-card module
-- First functional prototype game:
+- Functional multiplayer games:
   - **Sketch & Guess** with synced canvas, guessing chat, turn/timer state, and scoring
+  - **Stop (Human, Animal, Object)** with random letter rounds, synced STOP countdown,
+    community voting, and unique-vs-duplicate scoring
 - Mobile-first UI with Framer Motion transitions and synthesized win/loss sound effects.
 
 ## Stack

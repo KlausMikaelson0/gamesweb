@@ -29,7 +29,7 @@ export const GAME_LIBRARY: Record<GameId, GameCardConfig> = {
     title: "Stop: Human, Animal, Object",
     subtitle: "Beat the buzzer",
     description: "A timed category showdown with room-wide validation and score sync.",
-    status: "coming-soon",
+    status: "live",
     accentClass: "from-amber-500 to-orange-500",
   },
   "the-spy": {

@@ -8,7 +8,10 @@ export type GameId =
   | "five-second-rule";
 
 export type RoomStatus = "lobby" | "in-game";
+export type CurrentGame = "SKETCH" | "STOP" | "SPY" | "FIVE_SECOND_RULE";
 export type SketchPhase = "lobby" | "drawing" | "round-over";
+export type StopPhase = "lobby" | "input" | "countdown" | "voting" | "results";
+export type StopField = "name" | "animal" | "object" | "country" | "food";
 
 export interface PlayerState {
   id: string;
@@ -45,14 +48,56 @@ export interface SketchState {
   guessedPlayerIds: string[];
 }
 
+export interface StopAnswers {
+  name: string;
+  animal: string;
+  object: string;
+  country: string;
+  food: string;
+}
+
+export type StopValidation = Record<StopField, boolean>;
+export type StopFieldPoints = Record<StopField, number>;
+
+export interface StopFieldVotingSummary {
+  yes: number;
+  no: number;
+  myVote: boolean | null;
+}
+
+export type StopSubmissionVotes = Record<StopField, StopFieldVotingSummary>;
+
+export interface StopSubmission {
+  playerId: string;
+  playerName: string;
+  answers: StopAnswers;
+  locked: boolean;
+  autoValid: StopValidation;
+  communityValid: StopValidation;
+  pointsByField: StopFieldPoints;
+  totalRoundPoints: number;
+  votes: StopSubmissionVotes;
+}
+
+export interface StopState {
+  phase: StopPhase;
+  round: number;
+  letter: string;
+  timeLeft: number;
+  stopByPlayerId: string | null;
+  submissions: StopSubmission[];
+}
+
 export interface RoomState {
   code: string;
   game: GameId;
+  current_game: CurrentGame;
   status: RoomStatus;
   createdAt: number;
   players: PlayerState[];
   chat: ChatMessage[];
   sketch: SketchState;
+  stop: StopState;
 }
 
 export interface RoomStatePayload {

@@ -14,6 +14,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import { ChatPanel } from "@/components/room/chat-panel";
+import { StopGame } from "@/components/games/StopGame";
 import { PlayerList } from "@/components/room/player-list";
 import { SketchBoard } from "@/components/sketch/sketch-board";
 import { GAME_LIBRARY } from "@/lib/game-catalog";
@@ -50,6 +51,7 @@ export default function RoomPage() {
   const me = roomPayload?.me ?? null;
   const isHost = Boolean(me?.isHost);
   const isSketch = roomState?.game === "sketch-and-guess";
+  const isStop = roomState?.game === "stop-human-animal-object";
   const isDrawer = Boolean(isSketch && me && roomState?.sketch.drawerId === me.id);
   const canDraw = Boolean(isDrawer && roomState?.sketch.phase === "drawing");
   const scoreLeader = useMemo(
@@ -214,6 +216,14 @@ export default function RoomPage() {
                   {roomState?.sketch.timeLeft ?? 0}s
                 </span>
               )}
+              {isStop &&
+                (roomState?.stop.phase === "countdown" ||
+                  roomState?.stop.phase === "voting") && (
+                  <span className="inline-flex items-center gap-1 rounded-xl bg-white/10 px-3 py-1.5">
+                    <Timer className="h-4 w-4" />
+                    {roomState?.stop.timeLeft ?? 0}s
+                  </span>
+                )}
             </div>
           </div>
         </header>
@@ -283,6 +293,8 @@ export default function RoomPage() {
                   }}
                 />
               </>
+            ) : isStop && roomState ? (
+              <StopGame room={roomState} me={me} isHost={isHost} />
             ) : (
               <div className="rounded-2xl border border-dashed border-white/20 bg-white/5 p-8 text-center text-slate-300">
                 <p className="text-lg font-semibold text-white">{game.title}</p>
@@ -325,7 +337,7 @@ export default function RoomPage() {
             <PlayerList
               players={roomState?.players ?? []}
               currentPlayerId={me?.id}
-              drawerId={roomState?.sketch.drawerId}
+              drawerId={isSketch ? roomState?.sketch.drawerId : undefined}
             />
             <ChatPanel messages={roomState?.chat ?? []} />
           </aside>

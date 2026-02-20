@@ -5,8 +5,12 @@ const { Server } = require("socket.io");
 
 const ROOM_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const ROUND_DURATION_SECONDS = 60;
+const STOP_COUNTDOWN_SECONDS = 5;
+const STOP_VOTING_SECONDS = 20;
 const MAX_CHAT_MESSAGES = 80;
 const MAX_DRAWING_SEGMENTS = 5000;
+const STOP_FIELDS = ["name", "animal", "object", "country", "food"];
+const STOP_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const VALID_GAMES = new Set([
   "sketch-and-guess",
   "stop-human-animal-object",
@@ -208,6 +212,106 @@ app
         emitRoomState(room, io);
       });
 
+      socket.on("stop:start-round", () => {
+        const room = getRoomForSocket(socket);
+        if (!room || room.game !== "stop-human-animal-object") {
+          return;
+        }
+        if (room.hostId !== socket.id) {
+          socket.emit("room:error", { message: "Only the host can generate the letter." });
+          return;
+        }
+        if (room.players.size < 2) {
+          socket.emit("room:error", { message: "At least 2 players are required." });
+          return;
+        }
+
+        startStopRound(room, io);
+      });
+
+      socket.on("stop:update-answers", (payload) => {
+        const room = getRoomForSocket(socket);
+        if (!room || room.game !== "stop-human-animal-object") {
+          return;
+        }
+        const updated = updateStopAnswers(room, socket.id, payload?.answers);
+        if (updated) {
+          emitRoomState(room, io);
+        }
+      });
+
+      socket.on("stop:trigger-stop", () => {
+        const room = getRoomForSocket(socket);
+        if (!room || room.game !== "stop-human-animal-object") {
+          return;
+        }
+        if (room.stop.phase !== "input") {
+          socket.emit("room:error", { message: "STOP can only be triggered during input phase." });
+          return;
+        }
+        if (room.stop.stopByPlayerId) {
+          return;
+        }
+
+        const player = room.players.get(socket.id);
+        const submission = room.stop.submissions.get(socket.id);
+        if (!player || !submission || !isStopSubmissionComplete(submission)) {
+          socket.emit("room:error", {
+            message: "Fill all fields before pressing STOP.",
+          });
+          return;
+        }
+
+        submission.locked = true;
+        room.stop.phase = "countdown";
+        room.stop.stopByPlayerId = socket.id;
+        room.stop.timeLeft = STOP_COUNTDOWN_SECONDS;
+        room.status = "in-game";
+        appendMessage(room, {
+          from: "System",
+          text: `${player.name} pressed STOP! ${STOP_COUNTDOWN_SECONDS}s for everyone else.`,
+          type: "system",
+        });
+        emitRoomState(room, io);
+
+        clearStopTimer(room);
+        room.stop.timerId = setInterval(() => {
+          room.stop.timeLeft -= 1;
+          if (room.stop.timeLeft <= 0) {
+            transitionStopToVoting(room, io);
+            return;
+          }
+          emitRoomState(room, io);
+        }, 1000);
+      });
+
+      socket.on("stop:vote", (payload) => {
+        const room = getRoomForSocket(socket);
+        if (!room || room.game !== "stop-human-animal-object") {
+          return;
+        }
+        if (room.stop.phase !== "voting") {
+          return;
+        }
+
+        const didVote = castStopVote(room, socket.id, payload);
+        if (didVote) {
+          emitRoomState(room, io);
+        }
+      });
+
+      socket.on("stop:finalize-voting", () => {
+        const room = getRoomForSocket(socket);
+        if (!room || room.game !== "stop-human-animal-object") {
+          return;
+        }
+        if (room.hostId !== socket.id) {
+          socket.emit("room:error", { message: "Only host can finalize voting." });
+          return;
+        }
+        finalizeStopRound(room, io);
+      });
+
       socket.on("room:leave", () => {
         leaveCurrentRoom(socket, io, "left");
       });
@@ -235,6 +339,7 @@ function createRoom(code, game) {
   return {
     code,
     game,
+    current_game: mapGameToCurrentGame(game),
     hostId: "",
     status: "lobby",
     createdAt: Date.now(),
@@ -252,7 +357,30 @@ function createRoom(code, game) {
       timerId: null,
       lastDrawerIndex: -1,
     },
+    stop: {
+      phase: "lobby",
+      round: 0,
+      letter: "",
+      timeLeft: 0,
+      stopByPlayerId: null,
+      submissions: new Map(),
+      votes: new Map(),
+      timerId: null,
+    },
   };
+}
+
+function mapGameToCurrentGame(game) {
+  if (game === "sketch-and-guess") {
+    return "SKETCH";
+  }
+  if (game === "stop-human-animal-object") {
+    return "STOP";
+  }
+  if (game === "the-spy") {
+    return "SPY";
+  }
+  return "FIVE_SECOND_RULE";
 }
 
 function addPlayerToRoom(room, socket, name, isCreator) {
@@ -266,6 +394,20 @@ function addPlayerToRoom(room, socket, name, isCreator) {
   if (!room.hostId || isCreator) {
     room.hostId = socket.id;
   }
+
+  if (room.game === "stop-human-animal-object") {
+    const submission = ensureStopSubmission(room, socket.id, name);
+    if (room.stop.phase === "input") {
+      submission.locked = false;
+    } else if (
+      room.stop.phase === "countdown" ||
+      room.stop.phase === "voting" ||
+      room.stop.phase === "results"
+    ) {
+      submission.locked = true;
+    }
+  }
+
   socket.join(room.code);
   socket.data.roomCode = room.code;
 }
@@ -294,6 +436,16 @@ function leaveCurrentRoom(socket, io, reason = "left") {
       endSketchRound(room, io, "drawer-left");
     }
 
+    if (room.game === "stop-human-animal-object") {
+      removeStopPlayerArtifacts(room, socket.id);
+      if (room.stop.phase === "countdown" && room.players.size <= 1) {
+        transitionStopToVoting(room, io);
+        finalizeStopRound(room, io);
+      } else if (room.stop.phase === "voting" && room.players.size <= 1) {
+        finalizeStopRound(room, io);
+      }
+    }
+
     if (room.hostId === socket.id) {
       const nextHost = room.players.values().next().value;
       if (nextHost) {
@@ -316,6 +468,7 @@ function leaveCurrentRoom(socket, io, reason = "left") {
 
   if (room.players.size === 0) {
     clearSketchTimer(room);
+    clearStopTimer(room);
     rooms.delete(room.code);
     return;
   }
@@ -330,6 +483,7 @@ function startSketchRound(room, io) {
     return;
   }
 
+  room.current_game = "SKETCH";
   room.status = "in-game";
   room.sketch.round += 1;
   room.sketch.lastDrawerIndex = (room.sketch.lastDrawerIndex + 1) % players.length;
@@ -367,6 +521,7 @@ function endSketchRound(room, io, reason, winnerId) {
   clearSketchTimer(room);
   room.sketch.phase = "round-over";
   room.status = "lobby";
+  room.current_game = "SKETCH";
   appendMessage(room, {
     from: "System",
     text: `Round ended (${reason}). Word was "${room.sketch.currentWord}".`,
@@ -374,6 +529,252 @@ function endSketchRound(room, io, reason, winnerId) {
   });
   io.to(room.code).emit("sketch:round-ended", { reason, winnerId });
   emitRoomState(room, io);
+}
+
+function startStopRound(room, io) {
+  clearStopTimer(room);
+  room.current_game = "STOP";
+  room.status = "in-game";
+  room.stop.phase = "input";
+  room.stop.round += 1;
+  room.stop.letter = STOP_LETTERS[Math.floor(Math.random() * STOP_LETTERS.length)];
+  room.stop.timeLeft = 0;
+  room.stop.stopByPlayerId = null;
+  room.stop.votes.clear();
+
+  for (const submissionPlayerId of room.stop.submissions.keys()) {
+    if (!room.players.has(submissionPlayerId)) {
+      room.stop.submissions.delete(submissionPlayerId);
+    }
+  }
+
+  for (const player of room.players.values()) {
+    const submission = ensureStopSubmission(room, player.id, player.name);
+    resetStopSubmissionForRound(submission);
+  }
+
+  appendMessage(room, {
+    from: "System",
+    text: `STOP round ${room.stop.round} started. Letter is ${room.stop.letter}.`,
+    type: "system",
+  });
+  emitRoomState(room, io);
+}
+
+function transitionStopToVoting(room, io) {
+  if (room.stop.phase !== "countdown" && room.stop.phase !== "input") {
+    return;
+  }
+
+  clearStopTimer(room);
+  room.status = "in-game";
+  room.stop.phase = "voting";
+  room.stop.timeLeft = STOP_VOTING_SECONDS;
+
+  for (const player of room.players.values()) {
+    ensureStopSubmission(room, player.id, player.name);
+  }
+
+  for (const submission of room.stop.submissions.values()) {
+    submission.locked = true;
+    submission.autoValid = computeStopAutoValidation(submission.answers, room.stop.letter);
+    submission.communityValid = createStopValidation(false);
+    submission.pointsByField = createStopPoints(0);
+    submission.totalRoundPoints = 0;
+  }
+
+  appendMessage(room, {
+    from: "System",
+    text: "Voting phase started. Verify answers now.",
+    type: "system",
+  });
+  emitRoomState(room, io);
+
+  room.stop.timerId = setInterval(() => {
+    room.stop.timeLeft -= 1;
+    if (room.stop.timeLeft <= 0) {
+      finalizeStopRound(room, io);
+      return;
+    }
+    emitRoomState(room, io);
+  }, 1000);
+}
+
+function finalizeStopRound(room, io) {
+  if (room.stop.phase !== "voting") {
+    return;
+  }
+
+  clearStopTimer(room);
+
+  for (const submissionPlayerId of room.stop.submissions.keys()) {
+    if (!room.players.has(submissionPlayerId)) {
+      room.stop.submissions.delete(submissionPlayerId);
+    }
+  }
+
+  for (const player of room.players.values()) {
+    ensureStopSubmission(room, player.id, player.name);
+  }
+
+  for (const submission of room.stop.submissions.values()) {
+    submission.autoValid = computeStopAutoValidation(submission.answers, room.stop.letter);
+    submission.communityValid = createStopValidation(false);
+    submission.pointsByField = createStopPoints(0);
+    submission.totalRoundPoints = 0;
+
+    for (const field of STOP_FIELDS) {
+      const voteSummary = getStopVoteSummary(room, submission.playerId, field, null);
+      const hasVotes = voteSummary.yes + voteSummary.no > 0;
+      submission.communityValid[field] =
+        submission.autoValid[field] && (!hasVotes || voteSummary.yes >= voteSummary.no);
+    }
+  }
+
+  const frequenciesByField = {
+    name: new Map(),
+    animal: new Map(),
+    object: new Map(),
+    country: new Map(),
+    food: new Map(),
+  };
+
+  for (const submission of room.stop.submissions.values()) {
+    if (!room.players.has(submission.playerId)) {
+      continue;
+    }
+
+    for (const field of STOP_FIELDS) {
+      if (!submission.communityValid[field]) {
+        continue;
+      }
+      const normalized = normalizeStopAnswer(submission.answers[field]);
+      if (!normalized) {
+        continue;
+      }
+      const fieldMap = frequenciesByField[field];
+      fieldMap.set(normalized, (fieldMap.get(normalized) ?? 0) + 1);
+    }
+  }
+
+  for (const submission of room.stop.submissions.values()) {
+    if (!room.players.has(submission.playerId)) {
+      continue;
+    }
+
+    let totalRoundPoints = 0;
+    for (const field of STOP_FIELDS) {
+      if (!submission.communityValid[field]) {
+        submission.pointsByField[field] = 0;
+        continue;
+      }
+      const normalized = normalizeStopAnswer(submission.answers[field]);
+      if (!normalized) {
+        submission.pointsByField[field] = 0;
+        continue;
+      }
+      const count = frequenciesByField[field].get(normalized) ?? 0;
+      const points = count <= 1 ? 10 : 5;
+      submission.pointsByField[field] = points;
+      totalRoundPoints += points;
+    }
+
+    submission.totalRoundPoints = totalRoundPoints;
+    const player = room.players.get(submission.playerId);
+    if (player) {
+      player.score += totalRoundPoints;
+    }
+  }
+
+  const winner = Array.from(room.stop.submissions.values())
+    .filter((submission) => room.players.has(submission.playerId))
+    .sort((left, right) => right.totalRoundPoints - left.totalRoundPoints)[0];
+
+  room.stop.phase = "results";
+  room.stop.timeLeft = 0;
+  room.stop.stopByPlayerId = null;
+  room.status = "lobby";
+  room.current_game = "STOP";
+
+  if (winner && winner.totalRoundPoints > 0) {
+    appendMessage(room, {
+      from: "System",
+      text: `${winner.playerName} won the STOP round with ${winner.totalRoundPoints} points.`,
+      type: "system",
+    });
+  } else {
+    appendMessage(room, {
+      from: "System",
+      text: "STOP round finalized. No valid scoring answers this round.",
+      type: "system",
+    });
+  }
+
+  emitRoomState(room, io);
+}
+
+function updateStopAnswers(room, playerId, answersPayload) {
+  if (room.stop.phase !== "input" && room.stop.phase !== "countdown") {
+    return false;
+  }
+
+  const player = room.players.get(playerId);
+  if (!player) {
+    return false;
+  }
+  const submission = ensureStopSubmission(room, playerId, player.name);
+  if (submission.locked) {
+    return false;
+  }
+
+  const sanitizedPatch = sanitizeStopAnswerPatch(answersPayload);
+  if (!sanitizedPatch) {
+    return false;
+  }
+
+  let changed = false;
+  for (const field of STOP_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(sanitizedPatch, field)) {
+      const nextValue = sanitizedPatch[field];
+      if (submission.answers[field] !== nextValue) {
+        submission.answers[field] = nextValue;
+        changed = true;
+      }
+    }
+  }
+
+  return changed;
+}
+
+function castStopVote(room, voterId, payload) {
+  const targetPlayerId =
+    typeof payload?.targetPlayerId === "string" ? payload.targetPlayerId : "";
+  const field = typeof payload?.field === "string" ? payload.field : "";
+  const isValid = Boolean(payload?.isValid);
+
+  if (!room.players.has(voterId)) {
+    return false;
+  }
+  if (!targetPlayerId || !STOP_FIELDS.includes(field)) {
+    return false;
+  }
+  if (targetPlayerId === voterId) {
+    return false;
+  }
+
+  const targetSubmission = room.stop.submissions.get(targetPlayerId);
+  if (!targetSubmission) {
+    return false;
+  }
+  if (!targetSubmission.autoValid[field]) {
+    return false;
+  }
+
+  const voteKey = getStopVoteKey(targetPlayerId, field);
+  const voteMap = room.stop.votes.get(voteKey) ?? new Map();
+  voteMap.set(voterId, isValid);
+  room.stop.votes.set(voteKey, voteMap);
+  return true;
 }
 
 function emitRoomState(room, io) {
@@ -391,6 +792,7 @@ function emitRoomState(room, io) {
     const publicRoom = {
       code: room.code,
       game: room.game,
+      current_game: room.current_game,
       status: room.status,
       createdAt: room.createdAt,
       players: players.map((entry) => ({
@@ -411,10 +813,211 @@ function emitRoomState(room, io) {
         drawingSegments: room.sketch.drawingSegments,
         guessedPlayerIds: Array.from(room.sketch.guessedPlayerIds),
       },
+      stop: buildStopPublicState(room, player.id),
     };
 
     io.to(player.id).emit("room:state", { room: publicRoom, me });
   });
+}
+
+function buildStopPublicState(room, viewerPlayerId) {
+  const submissions = Array.from(room.stop.submissions.values())
+    .filter((submission) => room.players.has(submission.playerId))
+    .map((submission) => ({
+      playerId: submission.playerId,
+      playerName: submission.playerName,
+      answers: { ...submission.answers },
+      locked: submission.locked,
+      autoValid: { ...submission.autoValid },
+      communityValid: { ...submission.communityValid },
+      pointsByField: { ...submission.pointsByField },
+      totalRoundPoints: submission.totalRoundPoints,
+      votes: buildStopSubmissionVotes(room, submission.playerId, viewerPlayerId),
+    }))
+    .sort((left, right) => {
+      const leftPlayer = room.players.get(left.playerId);
+      const rightPlayer = room.players.get(right.playerId);
+      const scoreDifference = (rightPlayer?.score ?? 0) - (leftPlayer?.score ?? 0);
+      if (scoreDifference !== 0) {
+        return scoreDifference;
+      }
+      return left.playerName.localeCompare(right.playerName);
+    });
+
+  return {
+    phase: room.stop.phase,
+    round: room.stop.round,
+    letter: room.stop.letter,
+    timeLeft: room.stop.timeLeft,
+    stopByPlayerId: room.stop.stopByPlayerId,
+    submissions,
+  };
+}
+
+function buildStopSubmissionVotes(room, targetPlayerId, viewerPlayerId) {
+  return {
+    name: getStopVoteSummary(room, targetPlayerId, "name", viewerPlayerId),
+    animal: getStopVoteSummary(room, targetPlayerId, "animal", viewerPlayerId),
+    object: getStopVoteSummary(room, targetPlayerId, "object", viewerPlayerId),
+    country: getStopVoteSummary(room, targetPlayerId, "country", viewerPlayerId),
+    food: getStopVoteSummary(room, targetPlayerId, "food", viewerPlayerId),
+  };
+}
+
+function getStopVoteSummary(room, targetPlayerId, field, viewerPlayerId) {
+  const voteMap = room.stop.votes.get(getStopVoteKey(targetPlayerId, field));
+  let yes = 0;
+  let no = 0;
+  if (voteMap) {
+    voteMap.forEach((voteValue) => {
+      if (voteValue) {
+        yes += 1;
+      } else {
+        no += 1;
+      }
+    });
+  }
+  const myVote =
+    viewerPlayerId && voteMap && voteMap.has(viewerPlayerId)
+      ? voteMap.get(viewerPlayerId)
+      : null;
+
+  return {
+    yes,
+    no,
+    myVote: typeof myVote === "boolean" ? myVote : null,
+  };
+}
+
+function getStopVoteKey(targetPlayerId, field) {
+  return `${targetPlayerId}:${field}`;
+}
+
+function removeStopPlayerArtifacts(room, playerId) {
+  room.stop.submissions.delete(playerId);
+  if (room.stop.stopByPlayerId === playerId) {
+    room.stop.stopByPlayerId = null;
+  }
+
+  for (const [voteKey, voteMap] of room.stop.votes.entries()) {
+    if (voteKey.startsWith(`${playerId}:`)) {
+      room.stop.votes.delete(voteKey);
+      continue;
+    }
+    voteMap.delete(playerId);
+    if (voteMap.size === 0) {
+      room.stop.votes.delete(voteKey);
+    }
+  }
+}
+
+function ensureStopSubmission(room, playerId, playerName) {
+  let submission = room.stop.submissions.get(playerId);
+  if (!submission) {
+    submission = {
+      playerId,
+      playerName,
+      answers: createStopAnswers(),
+      locked: false,
+      autoValid: createStopValidation(false),
+      communityValid: createStopValidation(false),
+      pointsByField: createStopPoints(0),
+      totalRoundPoints: 0,
+    };
+    room.stop.submissions.set(playerId, submission);
+  }
+  submission.playerName = playerName;
+  return submission;
+}
+
+function resetStopSubmissionForRound(submission) {
+  submission.answers = createStopAnswers();
+  submission.locked = false;
+  submission.autoValid = createStopValidation(false);
+  submission.communityValid = createStopValidation(false);
+  submission.pointsByField = createStopPoints(0);
+  submission.totalRoundPoints = 0;
+}
+
+function isStopSubmissionComplete(submission) {
+  return STOP_FIELDS.every((field) => submission.answers[field].trim().length > 0);
+}
+
+function sanitizeStopAnswerPatch(answersPayload) {
+  if (!answersPayload || typeof answersPayload !== "object") {
+    return null;
+  }
+
+  const patch = {};
+  for (const field of STOP_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(answersPayload, field)) {
+      continue;
+    }
+    const rawValue = answersPayload[field];
+    if (typeof rawValue !== "string") {
+      continue;
+    }
+    patch[field] = rawValue.slice(0, 36).trimStart();
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return null;
+  }
+  return patch;
+}
+
+function computeStopAutoValidation(answers, letter) {
+  const validation = createStopValidation(false);
+  const normalizedLetter = String(letter || "").toLowerCase();
+
+  for (const field of STOP_FIELDS) {
+    const normalizedValue = normalizeStopAnswer(answers[field]);
+    validation[field] =
+      normalizedValue.length > 0 && normalizedValue.startsWith(normalizedLetter);
+  }
+
+  return validation;
+}
+
+function normalizeStopAnswer(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function createStopAnswers() {
+  return {
+    name: "",
+    animal: "",
+    object: "",
+    country: "",
+    food: "",
+  };
+}
+
+function createStopValidation(initialValue) {
+  return {
+    name: initialValue,
+    animal: initialValue,
+    object: initialValue,
+    country: initialValue,
+    food: initialValue,
+  };
+}
+
+function createStopPoints(initialValue) {
+  return {
+    name: initialValue,
+    animal: initialValue,
+    object: initialValue,
+    country: initialValue,
+    food: initialValue,
+  };
 }
 
 function appendMessage(room, message) {
@@ -434,6 +1037,13 @@ function clearSketchTimer(room) {
   if (room.sketch.timerId) {
     clearInterval(room.sketch.timerId);
     room.sketch.timerId = null;
+  }
+}
+
+function clearStopTimer(room) {
+  if (room.stop.timerId) {
+    clearInterval(room.stop.timerId);
+    room.stop.timerId = null;
   }
 }
 
