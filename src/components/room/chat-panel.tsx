@@ -22,7 +22,7 @@ export function ChatPanel({ messages }: ChatPanelProps) {
   }, [recentMessages]);
 
   return (
-    <section className="flex min-h-80 flex-col overflow-hidden rounded-2xl border border-white/15 bg-slate-900/60">
+    <section className="glass-card flex min-h-80 flex-col overflow-hidden rounded-2xl">
       <header className="flex items-center gap-2 border-b border-white/10 px-4 py-3 text-sm font-semibold text-slate-100">
         <MessageCircle className="h-4 w-4" />
         Live Chat

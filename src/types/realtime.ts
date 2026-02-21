@@ -4,14 +4,28 @@ export const ROOM_CODE_MAX_LENGTH = 6;
 export type GameId =
   | "sketch-and-guess"
   | "stop-human-animal-object"
+  | "spyfall"
+  | "most-likely-to"
+  | "truth-or-dare"
+  | "emoji-translator"
   | "the-spy"
   | "five-second-rule";
 
 export type RoomStatus = "lobby" | "in-game";
-export type CurrentGame = "SKETCH" | "STOP" | "SPY" | "FIVE_SECOND_RULE";
+export type CurrentGame =
+  | "SKETCH"
+  | "STOP"
+  | "SPYFALL"
+  | "MOST_LIKELY"
+  | "TRUTH_OR_DARE"
+  | "EMOJI_TRANSLATOR";
 export type SketchPhase = "lobby" | "drawing" | "round-over";
 export type StopPhase = "lobby" | "input" | "countdown" | "voting" | "results";
 export type StopField = "name" | "animal" | "object" | "country" | "food";
+export type SpyfallPhase = "lobby" | "reveal" | "discussion" | "voting" | "results";
+export type MostLikelyPhase = "lobby" | "voting" | "results";
+export type TruthOrDarePhase = "lobby" | "spinning" | "prompt";
+export type EmojiTranslatorPhase = "lobby" | "guessing" | "results";
 
 export interface PlayerState {
   id: string;
@@ -88,6 +102,61 @@ export interface StopState {
   submissions: StopSubmission[];
 }
 
+export interface VoteCount {
+  playerId: string;
+  votes: number;
+}
+
+export interface SpyfallState {
+  phase: SpyfallPhase;
+  round: number;
+  timeLeft: number;
+  myRole: "spy" | "citizen" | null;
+  myLocation: string | null;
+  spyIdRevealed: string | null;
+  locationRevealed: string | null;
+  myVoteTargetId: string | null;
+  votes: VoteCount[];
+}
+
+export interface MostLikelyState {
+  phase: MostLikelyPhase;
+  round: number;
+  question: string;
+  timeLeft: number;
+  myVoteTargetId: string | null;
+  votes: VoteCount[];
+  winnerPlayerId: string | null;
+}
+
+export interface TruthOrDareState {
+  phase: TruthOrDarePhase;
+  round: number;
+  timeLeft: number;
+  spinAngle: number;
+  selectedPlayerId: string | null;
+  mode: "truth" | "dare" | null;
+  prompt: string;
+}
+
+export interface EmojiTranslatorState {
+  phase: EmojiTranslatorPhase;
+  round: number;
+  timeLeft: number;
+  emoji: string;
+  answerLength: number;
+  solvedByPlayerId: string | null;
+  revealAnswer: string | null;
+}
+
+export interface ReactionEvent {
+  id: string;
+  emoji: string;
+  playerId: string;
+  playerName: string;
+  timestamp: number;
+}
+
 export interface RoomState {
   code: string;
   game: GameId;
@@ -98,6 +167,10 @@ export interface RoomState {
   chat: ChatMessage[];
   sketch: SketchState;
   stop: StopState;
+  spyfall: SpyfallState;
+  mostLikely: MostLikelyState;
+  truthOrDare: TruthOrDareState;
+  emojiTranslator: EmojiTranslatorState;
 }
 
 export interface RoomStatePayload {

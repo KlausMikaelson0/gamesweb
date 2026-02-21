@@ -23,13 +23,18 @@ export function CategorySection({ category }: CategorySectionProps) {
       </header>
 
       {category.games.length > 0 ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid auto-rows-[1fr] gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {gameCards.map((game) => (
-            <GameCard key={game.id} game={game} />
+            <div
+              key={game.id}
+              className={gameCards.length > 2 && game === gameCards[0] ? "lg:col-span-2" : ""}
+            >
+              <GameCard game={game} />
+            </div>
           ))}
         </div>
       ) : (
-        <div className="rounded-3xl border border-dashed border-white/25 bg-slate-900/50 p-6">
+        <div className="glass-card rounded-3xl border-dashed border-white/25 p-6">
           <div className="mb-3 flex items-center gap-2 text-violet-100">
             <Sparkles className="h-4 w-4" />
             <span className="text-sm font-semibold">Builder Modules</span>

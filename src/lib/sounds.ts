@@ -50,3 +50,26 @@ export function playLoseSound() {
     { frequency: 260, duration: 0.18 },
   ]);
 }
+
+export function playClickSound() {
+  playSequence([
+    { frequency: 520, duration: 0.04 },
+    { frequency: 610, duration: 0.05 },
+  ]);
+}
+
+export function playSuccessSound() {
+  playSequence([
+    { frequency: 740, duration: 0.08 },
+    { frequency: 920, duration: 0.09 },
+    { frequency: 1180, duration: 0.1 },
+  ]);
+}
+
+export function playTimeWarningSound() {
+  playSequence([
+    { frequency: 330, duration: 0.06 },
+    { frequency: 330, duration: 0.06 },
+    { frequency: 330, duration: 0.06 },
+  ]);
+}

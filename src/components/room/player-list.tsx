@@ -9,7 +9,7 @@ interface PlayerListProps {
 
 export function PlayerList({ players, currentPlayerId, drawerId }: PlayerListProps) {
   return (
-    <section className="rounded-2xl border border-white/15 bg-slate-900/60 p-4">
+    <section className="glass-card rounded-2xl p-4">
       <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-200">
         Players
       </h2>

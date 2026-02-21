@@ -79,7 +79,7 @@ function LobbyContent() {
         <motion.section
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
-          className="space-y-4 rounded-3xl border border-white/15 bg-slate-900/70 p-6 shadow-2xl shadow-violet-950/40"
+          className="glass-card space-y-4 rounded-3xl p-6"
         >
           <header className="space-y-2">
             <h1 className="text-2xl font-bold text-white">{game.title}</h1>
@@ -90,7 +90,7 @@ function LobbyContent() {
             <button
               type="button"
               onClick={() => setMode("create")}
-              className={`inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${
+              className={`neon-button inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${
                 mode === "create" ? "bg-white text-slate-900" : "text-slate-300 hover:text-white"
               }`}
             >
@@ -100,7 +100,7 @@ function LobbyContent() {
             <button
               type="button"
               onClick={() => setMode("join")}
-              className={`inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${
+              className={`neon-button inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${
                 mode === "join" ? "bg-white text-slate-900" : "text-slate-300 hover:text-white"
               }`}
             >
@@ -143,7 +143,7 @@ function LobbyContent() {
           <button
             type="button"
             onClick={submit}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-violet-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-400"
+            className="neon-button inline-flex w-full items-center justify-center gap-2 rounded-xl bg-violet-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-400"
           >
             <UsersRound className="h-4 w-4" />
             {mode === "create" ? "Create & Enter Room" : "Join Room"}
@@ -163,7 +163,7 @@ function LobbyContent() {
 function LobbyLoadingState() {
   return (
     <div className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100 sm:px-6">
-      <div className="mx-auto w-full max-w-lg rounded-3xl border border-white/15 bg-slate-900/70 p-6">
+      <div className="glass-card mx-auto w-full max-w-lg rounded-3xl p-6">
         <p className="text-sm text-slate-300">Loading lobby...</p>
       </div>
     </div>
