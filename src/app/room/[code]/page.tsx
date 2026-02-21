@@ -11,7 +11,6 @@ import {
   MessageCircleMore,
   PlayCircle,
   RefreshCw,
-  Timer,
   Trophy,
   UsersRound,
 } from "lucide-react";

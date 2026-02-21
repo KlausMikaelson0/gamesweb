@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { Eye, PlayCircle, ShieldAlert, Vote } from "lucide-react";
 import { getSocket } from "@/lib/socket-client";
@@ -13,12 +13,9 @@ interface SpyfallGameProps {
 }
 
 export function SpyfallGame({ room, me, isHost }: SpyfallGameProps) {
-  const [revealed, setRevealed] = useState(false);
+  const [revealedRound, setRevealedRound] = useState<number>(-1);
   const spyfall = room.spyfall;
-
-  useEffect(() => {
-    setRevealed(false);
-  }, [spyfall.round]);
+  const revealed = revealedRound === spyfall.round;
 
   const myVote = spyfall.myVoteTargetId;
 
@@ -83,7 +80,9 @@ export function SpyfallGame({ room, me, isHost }: SpyfallGameProps) {
         </h4>
         <motion.button
           type="button"
-          onClick={() => setRevealed((current) => !current)}
+          onClick={() =>
+            setRevealedRound((current) => (current === spyfall.round ? -1 : spyfall.round))
+          }
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.97 }}
           className="relative h-44 w-full overflow-hidden rounded-2xl border border-white/20 bg-slate-900/60"
@@ -132,6 +131,7 @@ export function SpyfallGame({ room, me, isHost }: SpyfallGameProps) {
                 }`}
               >
                 {player.name}
+                {player.id === me?.id ? " (You)" : ""}
               </button>
             ))}
           </div>
